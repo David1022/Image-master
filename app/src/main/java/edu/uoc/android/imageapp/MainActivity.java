@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
 import android.graphics.drawable.BitmapDrawable;
 import android.os.Bundle;
 import android.os.Environment;
@@ -29,8 +30,7 @@ import java.io.FileOutputStream;
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     public static final int REQUEST_IMAGE_CAPTURE = 1;
-    public static final String FILE_NAME = "imageapp.jpg";
-    public static final String SAVING_PATH = "/UOCImageApp";
+    public static final int DEGREES_TO_ROTATE = 270;
     // Request code
     private final int REQUEST_PERMISSION_STORAGE_SAVE = 101;
     private final int REQUEST_PERMISSION_STORAGE_DELETE = 102;
@@ -59,7 +59,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                               REQUEST_PERMISSION_STORAGE_OPEN);
         } else {
             // TODO(DONE): show the image from external storage if exists
-            Bitmap bm = getSavedFile();
+            Bitmap bm = FileManager.getSavedFile();
             if (bm != null) {
                 showImage(bm);
             } else {
@@ -69,8 +69,22 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private void showImage(Bitmap bm) {
+        if (shouldRotateImage(bm)) {
+            bm = rotateImage(bm);
+        }
         imageView.setImageBitmap(bm);
         tvMessage.setVisibility(View.GONE);
+    }
+
+    private boolean shouldRotateImage(Bitmap image) {
+        return image.getHeight() > image.getWidth();
+    }
+
+    private Bitmap rotateImage(Bitmap image) {
+        Matrix matrix = new Matrix();
+        matrix.postRotate(DEGREES_TO_ROTATE);
+
+        return Bitmap.createBitmap(image, 0, 0, image.getWidth(), image.getHeight(), matrix, true);
     }
 
     private void hideImage() {
@@ -110,13 +124,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private void showConfirmationDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("¿Seguro que deseas borrar la foto?")
-                .setMessage("Si aceptas la foto se borrará definitivamente y no se podrá volver a recuperar")
-                .setPositiveButton("Borrar", getPositiveClickListener())
-                .setNegativeButton("Cancelar", getNegativeClickListener())
-                .create()
-                .show();
+        if (FileManager.existsSavedPhoto()) {
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("¿Seguro que deseas borrar la foto?")
+                    .setMessage("Si aceptas la foto se borrará definitivamente y no se podrá volver a recuperar")
+                    .setPositiveButton("Borrar", getPositiveClickListener())
+                    .setNegativeButton("Cancelar", getNegativeClickListener())
+                    .create()
+                    .show();
+        } else {
+            Toast.makeText(this, "No hay ninguna foto a para borrar", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private DialogInterface.OnClickListener getNegativeClickListener() {
@@ -132,23 +150,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         return new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                deletePhoto();
+                if (FileManager.deletePhoto()) {
+                    hideImage();
+                    Toast.makeText(MainActivity.this, "Archivo borrado correctamente", Toast.LENGTH_SHORT).show();
+                }
             }
         };
     }
 
-    private void deletePhoto() {
-        String path = Environment.getExternalStorageDirectory().toString();
-        File myDir = new File(path + SAVING_PATH);
-        myDir.mkdirs();
-        File file = new File(myDir, FILE_NAME);
-        if (file.exists()) {
-            if (file.delete()) {
-                hideImage();
-                Toast.makeText(this, "Archivo borrado correctamente", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
 
     private void onSaveMenuTap() {
         // check permissions
@@ -158,40 +167,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                               REQUEST_PERMISSION_STORAGE_SAVE);
         } else {
             // TODO(DONE): save the image if image is displayed
-            savePhoto(((BitmapDrawable)imageView.getDrawable()).getBitmap());
+            if (FileManager.savePhoto(((BitmapDrawable)imageView.getDrawable()).getBitmap())) {
+                Toast.makeText(this, "Guardado correctamente", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Error al guardar", Toast.LENGTH_SHORT).show();
+            }
         }
-    }
-
-    private void savePhoto(Bitmap bm) {
-        String path = Environment.getExternalStorageDirectory().toString();
-        File myDir = new File(path + SAVING_PATH);
-        myDir.mkdirs();
-        File file = new File(myDir, FILE_NAME);
-        if (file.exists()) {
-            file.delete();
-        }
-        FileOutputStream fos = null;
-        try {
-            fos = new FileOutputStream(file);
-            bm.compress(Bitmap.CompressFormat.JPEG, 100, fos);
-            fos.flush();
-            fos.close();
-            Toast.makeText(this, "Guardado correctamente", Toast.LENGTH_SHORT).show();
-        } catch (Exception e) {
-            Toast.makeText(this, "Error al guardar", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private Bitmap getSavedFile() {
-        String path = Environment.getExternalStorageDirectory().toString();
-        path += SAVING_PATH;
-        File dir = new File(path);
-        File imageFile = new File(dir, FILE_NAME);
-        if (imageFile.exists()) {
-            Bitmap bitmap = BitmapFactory.decodeFile(imageFile.getPath());
-            return bitmap;
-        }
-        return null;
     }
 
     private boolean hasPermissionsToWrite() {
@@ -220,18 +201,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Bundle extras = data.getExtras();
             Bitmap imageBitmap = (Bitmap) extras.get("data");
             showImage(imageBitmap);
-        } else if (!existsSavedPhoto()) {
+        } else if (!FileManager.existsSavedPhoto()) {
             tvMessage.setVisibility(View.VISIBLE);
         }
-    }
-
-    private boolean existsSavedPhoto() {
-        String path = Environment.getExternalStorageDirectory().toString();
-        path += SAVING_PATH;
-        File dir = new File(path);
-        File imageFile = new File(dir, FILE_NAME);
-
-        return imageFile.exists();
     }
 
     @Override
@@ -257,7 +229,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     // save the image file
                     // TODO(DONE): save the image if image is displayed
-                    savePhoto(((BitmapDrawable)imageView.getDrawable()).getBitmap());
+                    FileManager.savePhoto(((BitmapDrawable)imageView.getDrawable()).getBitmap());
                 } else {
                     // permission denied, boo! Disable the
                     // functionality that depends on this permission.
@@ -268,8 +240,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
             case REQUEST_PERMISSION_STORAGE_OPEN: {
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    // TODO: show the image from external storage if exists
-
+                    // TODO(DONE): show the image from external storage if exists
+                    Bitmap bm = FileManager.getSavedFile();
+                    if (bm != null) {
+                        showImage(bm);
+                    } else {
+                        tvMessage.setVisibility(View.VISIBLE);
+                    }
                 }
             }
         }
